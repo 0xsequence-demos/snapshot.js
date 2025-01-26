@@ -2,12 +2,8 @@ import fetch from 'cross-fetch';
 import { Interface } from '@ethersproject/abi';
 import { Contract } from '@ethersproject/contracts';
 import { getAddress, isAddress } from '@ethersproject/address';
-import { parseUnits } from '@ethersproject/units';
 import { namehash, ensNormalize } from '@ethersproject/hash';
 import { jsonToGraphQLQuery } from 'json-to-graphql-query';
-import Ajv from 'ajv';
-import addFormats from 'ajv-formats';
-import addErrors from 'ajv-errors';
 import Multicaller from './utils/multicaller';
 import { getSnapshots } from './utils/blockfinder';
 import getProvider from './utils/provider';
@@ -36,16 +32,6 @@ const ENS_ABI = [
   'function resolver(bytes32 node) view returns (address)' // ENS registry ABI
 ];
 const EMPTY_ADDRESS = '0x0000000000000000000000000000000000000000';
-const STARKNET_NETWORKS = {
-  '0x534e5f4d41494e': {
-    name: 'Starknet',
-    testnet: false
-  },
-  '0x534e5f5345504f4c4941': {
-    name: 'Starknet Sepolia',
-    testnet: true
-  }
-};
 
 const scoreApiHeaders = {
   Accept: 'application/json',
@@ -88,178 +74,6 @@ async function parseScoreAPIResponse(res: any) {
   if (data.error) return Promise.reject(data.error);
   return data;
 }
-
-const ajv = new Ajv({
-  allErrors: true,
-  allowUnionTypes: true,
-  $data: true,
-  passContext: true
-});
-// @ts-ignore
-addFormats(ajv);
-addErrors(ajv);
-
-ajv.addFormat('address', {
-  validate: (value: string) => {
-    try {
-      return value === getAddress(value);
-    } catch (e: any) {
-      return false;
-    }
-  }
-});
-
-ajv.addFormat('evmAddress', {
-  validate: (value: string) => {
-    try {
-      getAddress(value);
-      return true;
-    } catch (e: any) {
-      return false;
-    }
-  }
-});
-
-ajv.addFormat('starknetAddress', {
-  validate: (value: string) => {
-    try {
-      return validateAndParseAddress(value) === value;
-    } catch (e: any) {
-      return false;
-    }
-  }
-});
-
-ajv.addFormat('long', {
-  validate: () => true
-});
-
-ajv.addFormat('lowercase', {
-  validate: (value: string) => value === value.toLowerCase()
-});
-
-ajv.addFormat('color', {
-  validate: (value: string) => {
-    if (!value) return false;
-    return !!value.match(/^#[0-9A-F]{6}$/);
-  }
-});
-
-ajv.addFormat('ethValue', {
-  validate: (value: string) => {
-    if (!value.match(/^([0-9]|[1-9][0-9]+)(\.[0-9]+)?$/)) return false;
-
-    try {
-      parseUnits(value, 18);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-});
-
-const networksIds = Object.keys(networks);
-const mainnetNetworkIds = Object.keys(networks).filter(
-  (id) => !networks[id].testnet
-);
-
-ajv.addKeyword({
-  keyword: 'snapshotNetwork',
-  validate: function (schema, data) {
-    // @ts-ignore
-    const snapshotEnv = this.snapshotEnv || 'default';
-    if (snapshotEnv === 'mainnet') return mainnetNetworkIds.includes(data);
-    return networksIds.includes(data);
-  },
-  error: {
-    message: 'network not allowed'
-  }
-});
-
-ajv.addKeyword({
-  keyword: 'starknetNetwork',
-  validate: function (schema, data) {
-    // @ts-ignore
-    const snapshotEnv = this.snapshotEnv || 'default';
-    if (snapshotEnv === 'mainnet') {
-      return Object.keys(STARKNET_NETWORKS)
-        .filter((id) => !STARKNET_NETWORKS[id].testnet)
-        .includes(data);
-    }
-
-    return Object.keys(STARKNET_NETWORKS).includes(data);
-  },
-  error: {
-    message: 'network not allowed'
-  }
-});
-
-ajv.addKeyword({
-  keyword: 'maxLengthWithSpaceType',
-  validate: function validate(schema, data) {
-    // @ts-ignore
-    const spaceType = this.spaceType || 'default';
-    const isValid = data.length <= schema[spaceType];
-    if (!isValid) {
-      // @ts-ignore
-      validate.errors = [
-        {
-          keyword: 'maxLengthWithSpaceType',
-          message: `must not have more than ${schema[spaceType]}`,
-          params: { limit: schema[spaceType] }
-        }
-      ];
-    }
-    return isValid;
-  },
-  errors: true
-});
-
-ajv.addKeyword({
-  keyword: 'maxItemsWithSpaceType',
-  validate: function validate(schema, data) {
-    // @ts-ignore
-    const spaceType = this.spaceType || 'default';
-    const isValid = data.length <= schema[spaceType];
-    if (!isValid) {
-      // @ts-ignore
-      validate.errors = [
-        {
-          keyword: 'maxItemsWithSpaceType',
-          message: `must NOT have more than ${schema[spaceType]} items`,
-          params: { limit: schema[spaceType] }
-        }
-      ];
-    }
-    return isValid;
-  },
-  errors: true
-});
-
-// Custom URL format to allow empty string values
-// https://github.com/snapshot-labs/snapshot.js/pull/541/files
-ajv.addFormat('customUrl', {
-  type: 'string',
-  validate: (str) => {
-    if (!str.length) return true;
-    return (
-      str.startsWith('http://') ||
-      str.startsWith('https://') ||
-      str.startsWith('ipfs://') ||
-      str.startsWith('ipns://') ||
-      str.startsWith('snapshot://')
-    );
-  }
-});
-
-ajv.addFormat('domain', {
-  validate: (value: string) => {
-    if (!value) return false;
-    return !!value.match(
-      /^(https:\/\/)?([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}(\/)?$/
-    );
-  }
-});
 
 export async function call(provider, abi: any[], call: any[], options?) {
   const contract = new Contract(call[0], abi, provider);
@@ -574,24 +388,6 @@ export async function validate(
   }
 }
 
-interface validateSchemaOptions {
-  snapshotEnv?: string;
-  spaceType?: string;
-}
-
-export function validateSchema(
-  schema,
-  data,
-  options: validateSchemaOptions = {
-    snapshotEnv: 'default',
-    spaceType: 'default'
-  }
-) {
-  const ajvValidate = ajv.compile(schema);
-  const valid = ajvValidate.call(options, data);
-  return valid ? valid : ajvValidate.errors;
-}
-
 export async function getEnsTextRecord(
   ens: string,
   record: string,
@@ -776,7 +572,6 @@ export default {
   sendTransaction,
   getScores,
   getVp,
-  validateSchema,
   getEnsTextRecord,
   getSpaceUri,
   getEnsOwner,

@@ -25,7 +25,6 @@ export default [
       nodeResolve({ preferBuiltins: true, browser: true }),
       commonjs(),
       globals(),
-      terser(),
       filesize(),
       string({
         include: '**/*.md'
